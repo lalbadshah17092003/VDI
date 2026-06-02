@@ -1,0 +1,58 @@
+
+
+{
+   "name": "vds-backend",
+  "version": "1.0.0",
+  "main": "server.js",
+  "dependencies": {
+    "@azure/identity": "^4.10.1",
+    "@azure/msal-node": "^3.6.1",
+    "@distube/ytdl-core": "^4.16.12",
+    "@microsoft/microsoft-graph-client": "^3.0.7",
+    "axios": "^1.13.4",
+    "bcryptjs": "^2.4.3",
+    "cheerio": "^1.2.0",
+    "cookie-parser": "^1.4.7",
+    "cors": "^2.8.6",
+    "csvtojson": "^2.0.14",
+    "dotenv": "^16.6.1",
+    "express": "^4.22.1",
+    "express-validator": "^7.3.1",
+    "fs": "^0.0.1-security",
+    "helmet": "^8.2.0",
+    "https": "^1.0.0",
+    "isomorphic-fetch": "^3.0.0",
+    "jsonwebtoken": "^9.0.3",
+    "jwt-decode": "^4.0.0",
+    "moment": "^2.30.1",
+    "mongodb": "^6.21.0",
+    "mongoose": "^8.22.1",
+    "morgan": "^1.10.1",
+    "multer": "^2.0.2",
+    "mysql": "^2.18.1",
+    "node-cron": "^3.0.3",
+    "node-fetch": "^3.3.2",
+    "nodemailer": "^6.10.1",
+    "pat": "^0.0.1",
+    "path": "^0.12.7",
+    "pm2": "^6.0.14",
+    "qs": "^6.14.1",
+    "xlsx": "^0.18.5",
+    "ytdl-core": "^4.11.5"
+  },
+  "devDependencies": {
+    "@microsoft/microsoft-graph-types": "^2.40.0",
+    "nodemon": "^3.1.9"
+  },
+  "scripts": {
+    "start": "nodemon server.js",
+    "dev": "concurrently \"pm2 start npm --name 'frontend' --cwd './frontend' -- start\" \"pm2 start 'node server.js' --name 'backend' --cwd './backend'\"",
+    "generate-ssl": "node generate-ssl.js",
+    "setup": "npm run generate-ssl && npm start",
+    "test-approval": "node test-approval.js",
+    "fix-consent": "node fix-admin-consent.js",
+    "start-with-ssl": "node server.js",
+    "test-ssl": "node test-ssl.js",
+    "restart": "node restart-server.js"
+  }
+}
