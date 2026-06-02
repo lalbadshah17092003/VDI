@@ -3,7 +3,7 @@ const cors = require('cors');
 const axios = require('axios');
 const cheerio = require('cheerio');
 const morgan = require('morgan');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const path = require('path');
 const fs = require('fs');
 const { v4: uuidv4 } = require('uuid');
@@ -11,8 +11,13 @@ const { v4: uuidv4 } = require('uuid');
 const app = express();
 const PORT = process.env.PORT || 5000;
 
-// Middleware
-app.use(cors());
+// ============================================
+// ✅ FIXED: Single CORS middleware
+// ============================================
+app.use(cors({
+    origin: '*', // For now, allow all
+    credentials: true
+}));
 app.use(express.json());
 app.use(morgan('dev'));
 
@@ -38,6 +43,25 @@ setInterval(() => {
         });
     });
 }, 1800000); // Every 30 minutes
+
+// ============================================
+// ✅ ADDED: Root route (fixes 404 error)
+// ============================================
+app.get('/', (req, res) => {
+    res.json({
+        success: true,
+        message: "🎥 Video Downloader API is running!",
+        status: "active",
+        endpoints: {
+            "Get video info": "POST /api/video-info",
+            "Download video": "POST /api/download",
+            "Stream video": "GET /api/download-stream",
+            "Health check": "GET /api/health"
+        },
+        note: "Send POST requests with { url: 'video_url' }",
+        timestamp: new Date().toISOString()
+    });
+});
 
 // ============================================
 // EXECUTE COMMAND HELPER
@@ -73,10 +97,20 @@ app.post('/api/video-info', async (req, res) => {
 
         console.log('📥 Fetching info for:', url);
 
+        // Check if yt-dlp is available
+        try {
+            await executeCommand('yt-dlp --version');
+        } catch (e) {
+            return res.status(500).json({
+                success: false,
+                error: 'yt-dlp is not installed on server. Contact administrator.',
+                fix: 'Install yt-dlp: https://github.com/yt-dlp/yt-dlp#installation'
+            });
+        }
+
         // YouTube - Use yt-dlp
         if (url.includes('youtube.com') || url.includes('youtu.be')) {
             try {
-                // Get video info as JSON
                 const command = `yt-dlp --dump-json --no-playlist --no-warnings "${url}"`;
                 console.log('Running:', command);
                 
@@ -85,7 +119,6 @@ app.post('/api/video-info', async (req, res) => {
                 
                 console.log('✅ Got info for:', info.title);
 
-                // Format the response
                 const videoInfo = {
                     success: true,
                     platform: 'youtube',
@@ -101,14 +134,11 @@ app.post('/api/video-info', async (req, res) => {
                     formats: []
                 };
 
-                // Get available formats
                 if (info.formats && info.formats.length > 0) {
                     const seen = new Set();
                     videoInfo.formats = info.formats
                         .filter(f => {
-                            // Filter out formats without video or audio
                             if (f.vcodec === 'none' && f.acodec === 'none') return false;
-                            // Deduplicate
                             const key = `${f.format_note}_${f.ext}_${f.filesize}`;
                             if (seen.has(key)) return false;
                             seen.add(key);
@@ -123,10 +153,10 @@ app.post('/api/video-info', async (req, res) => {
                                 'Unknown size',
                             vcodec: f.vcodec,
                             acodec: f.acodec,
-                            tbr: f.tbr, // total bitrate
+                            tbr: f.tbr,
                             fps: f.fps
                         }))
-                        .slice(0, 20); // Limit to 20 formats
+                        .slice(0, 20);
                 }
 
                 return res.json(videoInfo);
@@ -135,7 +165,7 @@ app.post('/api/video-info', async (req, res) => {
                 console.error('❌ yt-dlp error:', ytError);
                 return res.status(400).json({ 
                     success: false, 
-                    error: 'Failed to fetch YouTube video. The video might be private or unavailable. Please make sure yt-dlp is installed correctly.' 
+                    error: 'Failed to fetch video. The video might be private or unavailable.' 
                 });
             }
         }
@@ -143,7 +173,6 @@ app.post('/api/video-info', async (req, res) => {
         // Instagram
         else if (url.includes('instagram.com')) {
             try {
-                // Try yt-dlp first for Instagram
                 try {
                     const command = `yt-dlp --dump-json --no-playlist "${url}"`;
                     const stdout = await executeCommand(command);
@@ -166,7 +195,6 @@ app.post('/api/video-info', async (req, res) => {
                         }]
                     });
                 } catch (e) {
-                    // Fallback to web scraping
                     console.log('yt-dlp failed for Instagram, trying web scraping...');
                 }
 
@@ -207,15 +235,14 @@ app.post('/api/video-info', async (req, res) => {
                 console.error('Instagram error:', igError);
                 return res.status(400).json({ 
                     success: false, 
-                    error: 'Failed to fetch Instagram content. Post might be private or unavailable.' 
+                    error: 'Failed to fetch Instagram content.' 
                 });
             }
         }
 
-        // Direct URL or other platforms
+        // Other platforms
         else {
             try {
-                // Try yt-dlp for any URL
                 const command = `yt-dlp --dump-json --no-playlist "${url}"`;
                 const stdout = await executeCommand(command);
                 const info = JSON.parse(stdout);
@@ -236,7 +263,6 @@ app.post('/api/video-info', async (req, res) => {
                     }]
                 });
             } catch (e) {
-                // Just return basic info for direct URLs
                 return res.json({
                     success: true,
                     platform: 'direct',
@@ -277,12 +303,9 @@ app.post('/api/download', async (req, res) => {
 
         const videoId = uuidv4();
         const outputPath = path.join(TEMP_DIR, `${videoId}.%(ext)s`);
-        const finalOutput = path.join(TEMP_DIR, videoId);
 
-        // Build yt-dlp command
         let command = `yt-dlp`;
         
-        // Format selection
         if (format_id && format_id !== 'best' && format_id !== 'original') {
             command += ` -f ${format_id}+bestaudio[ext=m4a]/best`;
         } else if (format_id === 'audio') {
@@ -295,28 +318,12 @@ app.post('/api/download', async (req, res) => {
         command += ` --no-playlist`;
         command += ` --no-warnings`;
         command += ` --no-check-certificate`;
-        
-        // For Instagram direct URLs, just download directly
-        if (url.includes('instagram.com') && format_id === 'original') {
-            const response = await axios({
-                method: 'GET',
-                url: url,
-                responseType: 'stream'
-            });
-            
-            res.setHeader('Content-Disposition', `attachment; filename="instagram_${Date.now()}.mp4"`);
-            res.setHeader('Content-Type', 'video/mp4');
-            return response.data.pipe(res);
-        }
-        
         command += ` "${url}"`;
         
         console.log('Running:', command);
 
-        // Execute download
         await executeCommand(command);
         
-        // Find the downloaded file
         const files = fs.readdirSync(TEMP_DIR)
             .filter(f => f.startsWith(videoId))
             .map(f => path.join(TEMP_DIR, f));
@@ -333,9 +340,7 @@ app.post('/api/download', async (req, res) => {
         
         console.log('✅ Downloaded:', filename);
 
-        // Send file and clean up
         res.download(downloadedFile, filename, (err) => {
-            // Clean up after sending
             fs.unlink(downloadedFile, () => {});
             if (err) {
                 console.error('Send error:', err);
@@ -352,7 +357,7 @@ app.post('/api/download', async (req, res) => {
 });
 
 // ============================================
-// SIMPLE STREAM ENDPOINT (No temp file)
+// STREAM ENDPOINT
 // ============================================
 app.get('/api/download-stream', async (req, res) => {
     try {
@@ -370,7 +375,6 @@ app.get('/api/download-stream', async (req, res) => {
         }
         command += ` "${url}" --no-playlist`;
 
-        const { spawn } = require('child_process');
         const ytdlp = spawn('yt-dlp', command.split(' ').slice(1));
 
         res.setHeader('Content-Type', 'video/mp4');
@@ -412,9 +416,9 @@ app.get('/api/health', async (req, res) => {
         });
     } catch (error) {
         res.json({
-            status: 'ok',
+            status: 'warning',
             yt_dlp: 'not installed',
-            error: 'yt-dlp is not installed. Install it for YouTube support.',
+            error: 'yt-dlp is not installed. Video download features will not work.',
             install_guide: 'https://github.com/yt-dlp/yt-dlp#installation'
         });
     }
@@ -432,7 +436,7 @@ function formatDuration(seconds) {
     if (hours > 0) {
         return `${hours}:${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
     }
-    return `${minutes}:${secs.toString().padStart(2, '0')}`;
+    return `${minutes}:${secs.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
 // ============================================
@@ -441,13 +445,14 @@ function formatDuration(seconds) {
 app.listen(PORT, () => {
     console.log(`
 ╔══════════════════════════════════════════════╗
-║   🎥 Video Downloader API (yt-dlp)          ║
+║   🎥 Video Downloader API                    ║
 ║   Server running on port ${PORT}                ║
 ║                                              ║
-║   POST /api/video-info     - Get video info  ║
-║   POST /api/download       - Download video  ║
-║   GET  /api/download-stream - Stream video   ║
-║   GET  /api/health         - Health check    ║
+║   GET  /                 - API info          ║
+║   POST /api/video-info   - Get video info    ║
+║   POST /api/download     - Download video    ║
+║   GET  /api/download-stream - Stream video  ║
+║   GET  /api/health       - Health check      ║
 ╚══════════════════════════════════════════════╝
     `);
 });
