@@ -64,7 +64,7 @@
     "xlsx": "^0.18.5"
   },
   "scripts": {
-    "start": "cross-env HTTPS=true SSL_CRT_FILE=../backend/ssl/server.cert SSL_KEY_FILE=../backend/ssl/server.key react-scripts start",
+    "start": "react-scripts start",
     "start-https": "node start-https.js",
     "build": "react-scripts build",
     "test": "react-scripts test",
